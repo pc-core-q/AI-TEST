@@ -12,23 +12,24 @@ export async function onRequestPost(context) {
       });
     }
 
-    // تلخيص الكتالوج
+    // تلخيص خفيف للمنتجات لتسريع الإجابة
     const productsText = (products || []).slice(0, 30).map(p => 
       `[${p.id}] ${p.name} - السعر: ${p.price} د.ع`
     ).join("\n");
 
     const systemPrompt = `أنت مساعد متجر "${storeInfo?.name || 'المتجر'}".
-ساعات العمل: ${storeInfo?.workingHours || ''}
-التوصيل: ${storeInfo?.deliveryInfo || ''}
-المنتجات المتاحة حالياً:
+أوقات العمل: ${storeInfo?.workingHours || ''}
+معلومات التوصيل: ${storeInfo?.deliveryInfo || ''}
+المنتجات المتوفرة:
 ${productsText}
 
 التعليمات:
 - أجب عن سؤال الزبون بلباقة وسرعة واختصار بلهجة عربية بسيطة ومرحبة.
 - اقترح المنتجات المناسبة من القائمة أعلاه فقط.
-- إذا اقترحت أو ذكرت منتجات، ضع أرقامها فقط في نهاية رسالتك بهذا الشكل:
+- إذا اقترحت أو ذكرت أي منتج، ضع معرّفاته فقط في نهاية رسالتك تماماً بهذا الشكل:
 <!--PRODUCTS: ["prd_xxx"]-->`;
 
+    // استخدام الموديل الافتراضي السريع والمجاني لجميع الحسابات
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -36,7 +37,7 @@ ${productsText}
         "Authorization": `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "llama-3.1-8b-instant",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: message || "" }
@@ -48,7 +49,6 @@ ${productsText}
 
     const data = await groqRes.json();
 
-    // إذا أرجع Groq أي خطأ سنظهره لنعرف السبب فوراً
     if (data.error) {
       return new Response(JSON.stringify({ 
         reply: `خطأ من Groq: ${data.error.message || JSON.stringify(data.error)}` 
@@ -57,9 +57,9 @@ ${productsText}
       });
     }
 
-    const rawReply = data.choices?.[0]?.message?.content || "عذراً، لم أستطع العثور على رد.";
+    const rawReply = data.choices?.[0]?.message?.content || "عذراً، لم أستطع العثور على رد مناسب حالياً.";
 
-    // استخراج معرّفات المنتجات
+    // استخراج معرّفات المنتجات لعرض كروت الشراء
     let productIds = [];
     let cleanReply = rawReply;
     const match = rawReply.match(/<!--PRODUCTS:\s*(\[.*?\])\s*-->/);
