@@ -13,27 +13,33 @@ export async function onRequestPost(context) {
     }
 
     // تجهيز قائمة مصغرة بالمنتجات
-    const productsText = (products || []).slice(0, 60).map(p => 
+    const productsText = (products || []).slice(0, 80).map(p => 
       `- [ID: ${p.id}] الاسم: ${p.name} | السعر: ${p.price} | الباركود: ${p.barcode || 'لا يوجد'}`
     ).join("\n");
 
-    const systemPrompt = `أنت المساعد الذكي لمتجر "${storeInfo?.name || 'المتجر'}". جاوب الزبون بلباقة وبساطة. إذا اقترحت منتجات ضع معرّفاتها في النهاية هكذا: <!--PRODUCTS: ["id1"]-->`;
+    const systemPrompt = `أنت المساعد الذكي لمتجر "${storeInfo?.name || 'المتجر'}".
+جاوب الزبون بلباقة وبساطة بلهجة ودية.
+إذا اقترحت منتجات من القائمة، ضع معرّفاتها (IDs) في نهاية ردك فقط بهذا الشكل تماماً:
+<!--PRODUCTS: ["prd_xxx", "prd_yyy"]-->`;
 
-    // استدعاء Gemini API
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // الرابط المستقر المباشر (v1)
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     
     const geminiRes = await fetch(geminiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: (message || "") }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] }
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `${systemPrompt}\n\nبيانات المنتجات المتوفرة:\n${productsText}\n\nسؤال الزبون:\n${message || ""}` }]
+          }
+        ]
       })
     });
 
     const data = await geminiRes.json();
 
-    // إذا أرجعت جوجل أي خطأ سنظهره مباشرة لنعرف السبب
     if (data.error) {
       return new Response(JSON.stringify({ 
         reply: `خطأ من Google: ${data.error.message || JSON.stringify(data.error)}` 
@@ -44,7 +50,7 @@ export async function onRequestPost(context) {
 
     const rawReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "لم أجد إجابة مناسبة حالياً.";
 
-    // استخراج معرّفات المنتجات
+    // استخراج معرّفات المنتجات لعرض كروت الشراء
     let productIds = [];
     let cleanReply = rawReply;
     const match = rawReply.match(/<!--PRODUCTS:\s*(\[.*?\])\s*-->/);
