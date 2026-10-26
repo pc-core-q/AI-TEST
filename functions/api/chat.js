@@ -3,7 +3,7 @@ export async function onRequestPost(context) {
     const { request, env } = context;
     const body = await request.json();
     
-    const { message, storeInfo, products } = body;
+    const { message, history, storeInfo, products, categories, cartInfo } = body;
     const apiKey = (env.GROQ_API_KEY || "").trim();
 
     if (!apiKey) {
@@ -12,52 +12,70 @@ export async function onRequestPost(context) {
       });
     }
 
-    // 1. جلب قائمة الموديلات المتاحة لحسابك مباشرة من Groq بدون تخمين
+    // 1. اختيار موديل سريع ونشط تلقائياً
     const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
       headers: { "Authorization": `Bearer ${apiKey}` }
     });
     const modelsData = await modelsRes.json();
-
-    if (modelsData.error) {
-      return new Response(JSON.stringify({ reply: `خطأ في مفتاح Groq: ${modelsData.error.message}` }), {
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
-    // استبعاد موديلات الصوت والصور وحصر الموديلات النصية المتاحة
     const availableChatModels = (modelsData.data || [])
       .map(m => m.id)
       .filter(id => !id.includes("whisper") && !id.includes("embed") && !id.includes("guard") && !id.includes("vision"));
 
-    if (availableChatModels.length === 0) {
-      return new Response(JSON.stringify({ reply: "لا توجد موديلات محادثة مفعلة في حسابك في Groq حالياً." }), {
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
-    // اختيار أفضل موديل متاح تلقائياً (Llama أو Qwen أو أول موديل متاح)
     const activeModel = availableChatModels.find(id => id.includes("llama")) || 
-                        availableChatModels.find(id => id.includes("qwen") || id.includes("mixtral") || id.includes("gemma")) || 
+                        availableChatModels.find(id => id.includes("qwen") || id.includes("mixtral")) || 
                         availableChatModels[0];
 
-    // 2. تجهيز ملخص المنتجات
-    const productsText = (products || []).slice(0, 30).map(p => 
-      `[${p.id}] ${p.name} - السعر: ${p.price} د.ع`
-    ).join("\n");
+    // 2. تجهيز نصوص المتجر المتكاملة
+    const catsText = (categories || []).map(c => `- قسم "${c.name}": رابطه ( products.html?cat=${c.id} )`).join("\n");
+    
+    const productsText = (products || []).slice(0, 20).map(p => {
+      let details = `[${p.id}] ${p.name} - السعر: ${p.price} د.ع`;
+      if (p.isOffer && p.oldPrice) details += ` (عرض خاص! السعر السابق: ${p.oldPrice} د.ع)`;
+      if (p.colors && p.colors.length) details += ` | الألوان: ${p.colors.join('، ')}`;
+      if (p.sizes && p.sizes.length) details += ` | المقاسات/الأحجام: ${p.sizes.join('، ')}`;
+      if (p.desc) details += ` | وصف: ${p.desc}`;
+      return details;
+    }).join("\n");
 
-    const systemPrompt = `أنت مساعد متجر "${storeInfo?.name || 'المتجر'}".
-أوقات العمل: ${storeInfo?.workingHours || ''}
-التوصيل: ${storeInfo?.deliveryInfo || ''}
-المنتجات المتوفرة:
-${productsText}
+    const systemPrompt = `أنت المساعد الذكي والمستشار الرسمي لمتجر "${storeInfo?.name || 'المتجر'}".
+معلومات المتجر والتواصل:
+- الهاتف الأساسي: ${storeInfo?.phone || 'غير محدد'}
+- هاتف إضافي: ${storeInfo?.phone2 || 'غير محدد'}
+- واتساب: ${storeInfo?.whatsapp || 'غير محدد'}
+- إنستغرام: ${storeInfo?.instagram ? storeInfo.instagram : 'غير متوفر'}
+- تيك توك: ${storeInfo?.tiktok ? storeInfo.tiktok : 'غير متوفر'}
+- العنوان: ${storeInfo?.address || 'غير محدد'}
+- موقع الخريطة: ${storeInfo?.mapUrl ? storeInfo.mapUrl : 'غير متوفر'}
+- أوقات العمل: ${storeInfo?.workingHours || 'غير محدد'}
+- التوصيل: ${storeInfo?.deliveryInfo || 'توصيل متوفر لكافة المناطق'}
 
-التعليمات:
-- أجب بلباقة وسرعة واختصار بلهجة عربية بسيطة ومرحبة.
-- اقترح المنتجات المناسبة من القائمة فقط.
-- إذا اقترحت أي منتج ضع معرّفاته في نهاية الرسالة بهذا الشكل حصراً:
-<!--PRODUCTS: ["prd_xxx"]-->`;
+حالة سلة الزبون الحالية:
+${cartInfo?.summary || 'السلة فارغة حالياً.'}
 
-    // 3. إرسال الطلب للموديل المختار تلقائياً
+أقسام المتجر:
+${catsText}
+- روابط هامة: ( categories.html للأقسام ، products.html للمتجر ، cart.html للسلة ، contact.html للتواصل )
+
+عينة المنتجات الأكثر صلة بطلب الزبون:
+${productsText || 'لا توجد منتجات مطابقة مباشرة.'}
+
+التعليمات والإرشادات:
+1. أجب بأسلوب ودود ومختصر ولبق (لهجة عراقية مهذبة أو عربية مبسطة).
+2. إذا سأل الزبون عن حسابتكم بمواقع التواصل، زوده بإنستغرام أو تيك توك من المعلومات أعلاه.
+3. إذا سأل الزبون عن سلة مشترياته أو عدد المنتجات بها أو إجمالي حسابه، أجب بدقة من قسم "حالة سلة الزبون الحالية".
+4. إذا سأل عن توفر ألوان أو مقاسات لمنتج، ارجع لتفاصيل المنتجات أعلاه وأخبره بالمتوفر منها.
+5. إذا اقترحت منتجات للشراء، ضع معرّفاتها في نهاية رسالتك تماماً بهذا الشكل حصراً:
+<!--PRODUCTS: ["prd_xxx", "prd_yyy"]-->`;
+
+    // 3. بناء سجل المحادثة لدعم الذاكرة المتتابعة
+    const messages = [{ role: "system", content: systemPrompt }];
+    if (Array.isArray(history)) {
+      history.slice(-4).forEach(h => {
+        if (h.role && h.content) messages.push({ role: h.role, content: h.content });
+      });
+    }
+    messages.push({ role: "user", content: message || "" });
+
     const chatRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -66,26 +84,15 @@ ${productsText}
       },
       body: JSON.stringify({
         model: activeModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message || "" }
-        ],
+        messages: messages,
         temperature: 0.5,
-        max_tokens: 300
+        max_tokens: 350
       })
     });
 
     const chatData = await chatRes.json();
+    const rawReply = chatData.choices?.[0]?.message?.content || "أهلاً بك! كيف أقدر أساعدك؟";
 
-    if (chatData.error) {
-      return new Response(JSON.stringify({ reply: `خطأ من Groq (${activeModel}): ${chatData.error.message}` }), {
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
-    const rawReply = chatData.choices?.[0]?.message?.content || "أهلاً بك! كيف يمكنني مساعدتك؟";
-
-    // استخراج معرّفات المنتجات لعرض كروت الشراء
     let productIds = [];
     let cleanReply = rawReply;
     const match = rawReply.match(/<!--PRODUCTS:\s*(\[.*?\])\s*-->/);
