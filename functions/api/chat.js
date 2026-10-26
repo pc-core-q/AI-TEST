@@ -4,45 +4,49 @@ export async function onRequestPost(context) {
     const body = await request.json();
     
     const { message, storeInfo, products } = body;
-    const apiKey = (env.GEMINI_API_KEY || "").trim();
+    const apiKey = (env.GROQ_API_KEY || "").trim();
 
     if (!apiKey) {
-      return new Response(JSON.stringify({ reply: "تنبيه: مفتاح GEMINI_API_KEY غير موجود في إعدادات Cloudflare." }), {
+      return new Response(JSON.stringify({ reply: "تنبيه: مفتاح GROQ_API_KEY غير موجود في Cloudflare." }), {
         headers: { "Content-Type": "application/json" }
       });
     }
 
-    // تلخيص خفيف جداً (أول 20 منتجاً فقط) لسرعة معالجة فائقة
-    const productsText = (products || []).slice(0, 20).map(p => 
-      `[${p.id}] ${p.name} (${p.price} د.ع)`
+    // تلخيص خفيف للمنتجات
+    const productsText = (products || []).slice(0, 25).map(p => 
+      `[${p.id}] ${p.name} - السعر: ${p.price}`
     ).join("\n");
 
-    const prompt = `أنت بائع ومساعد متجر "${storeInfo?.name || 'المتجر'}".
-ساعات العمل: ${storeInfo?.workingHours || ''} | التوصيل: ${storeInfo?.deliveryInfo || ''}
-المنتجات المتاحة:
+    const systemPrompt = `أنت مساعد متجر "${storeInfo?.name || 'المتجر'}".
+معلومات المتجر: ${storeInfo?.workingHours || ''} | ${storeInfo?.deliveryInfo || ''}
+المنتجات:
 ${productsText}
 
-سؤال الزبون: ${message || ""}
-جاوب فوراً وبسطرين فقط بلهجة ودية سريعة. إذا اقترحت منتجات ضع أرقامها فقط في النهاية هكذا:
+التعليمات:
+- أجب باختصار ولطافة وبسرعة باللهجة العراقية الودية أو عربية بسيطة.
+- إذا اقترحت منتجات ضع معرّفاتها في النهاية هكذا فقط:
 <!--PRODUCTS: ["prd_xxx"]-->`;
 
-    // gemini-flash-lite-latest هو أسرع موديل نصي متاح في حسابك
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${apiKey}`;
-
-    const geminiRes = await fetch(geminiUrl, {
+    // طلب فائق السرعة عبر محرك Groq
+    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          maxOutputTokens: 150,
-          temperature: 0.4
-        }
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: message || "" }
+        ],
+        temperature: 0.5,
+        max_tokens: 200
       })
     });
 
-    const data = await geminiRes.json();
-    const rawReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "أهلاً بك! كيف أقدر أساعدك؟";
+    const data = await groqRes.json();
+    const rawReply = data.choices?.[0]?.message?.content || "أهلاً بك! كيف أقدر أساعدك؟";
 
     let productIds = [];
     let cleanReply = rawReply;
@@ -59,7 +63,7 @@ ${productsText}
     });
 
   } catch (err) {
-    return new Response(JSON.stringify({ reply: "حدث خطأ بسيط، يرجى المحاولة ثانية." }), {
+    return new Response(JSON.stringify({ reply: "حدث خطأ في الاتصال، يرجى المحاولة ثانية." }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
