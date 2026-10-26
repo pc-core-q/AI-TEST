@@ -23,7 +23,8 @@
         <div id="aiMessages" class="ai-messages">
           <div class="ai-msg bot">
             <div class="ai-bubble">
-              مرحباً بك! أنا مساعد <strong>${escapeHtml(STORE_CONFIG.storeName || "المتجر")}</strong> السريع. كيف أقدر أساعدك اليوم؟
+              مرحباً بك! أنا مستشارك الذكي في <strong>${escapeHtml(STORE_CONFIG.storeName || "المتجر")}</strong>.
+              أستطيع إجابتك عن أي استفسار يخص المنتجات، المقاسات، العروض، التوصيل، أو سلة مشترياتك!
             </div>
           </div>
         </div>
@@ -44,6 +45,9 @@
   const input = document.getElementById("aiInput");
   const messages = document.getElementById("aiMessages");
 
+  // سجل ذاكرة المحادثة أثناء الجلسة
+  const conversationHistory = [];
+
   toggleBtn.onclick = () => {
     box.style.display = box.style.display === "none" ? "flex" : "none";
     if (box.style.display === "flex") input.focus();
@@ -57,50 +61,101 @@
     addMessage("user", text);
     input.value = "";
 
-    const loadingId = addMessage("bot", "جاري البحث...");
+    const loadingId = addMessage("bot", "جاري البحث والمساعدة...");
 
     try {
       const settings = Store.getSettings ? Store.getSettings() : {};
       const storeInfo = {
         name: STORE_CONFIG.storeName || "",
-        workingHours: settings.workingHours || STORE_CONFIG.workingHours || "مفتوح يومياً",
-        deliveryInfo: settings.deliveryInfo || STORE_CONFIG.deliveryInfo || "توصيل متوفر",
-        whatsapp: settings.whatsapp || STORE_CONFIG.whatsappNumber || ""
+        phone: settings.phone || STORE_CONFIG.phone || "",
+        phone2: settings.phone2 || STORE_CONFIG.phone2 || "",
+        whatsapp: settings.whatsapp || STORE_CONFIG.whatsappNumber || "",
+        address: settings.address || STORE_CONFIG.address || "",
+        mapUrl: settings.mapUrl || STORE_CONFIG.mapUrl || "",
+        workingHours: settings.workingHours || STORE_CONFIG.workingHours || "",
+        deliveryInfo: settings.deliveryInfo || STORE_CONFIG.deliveryInfo || "",
+        instagram: settings.instagram || STORE_CONFIG.instagram || "",
+        tiktok: settings.tiktok || STORE_CONFIG.tiktok || ""
       };
 
-      // تصفية ذكية سريعة في الهاتف لإرسال أهم المنتجات فقط بحجم خفيف جداً
-      const allItems = Store.getIndexItems ? Store.getIndexItems() : (Store.getProducts ? Store.getProducts() : []);
-      const available = allItems.filter(p => p.available !== false && p.stock > 0);
-      
+      // 1. قراءة وفحص سلة المشتريات الحالية للزبون
+      let cartSummary = "السلة فارغة حالياً.";
+      if (typeof Store.getCart === "function") {
+        const cart = Store.getCart();
+        if (cart && cart.length > 0) {
+          const allProducts = Store.getProducts ? Store.getProducts() : (Store.getIndexItems ? Store.getIndexItems() : []);
+          let total = 0;
+          const itemsText = cart.map(c => {
+            const p = allProducts.find(item => item.id === c.productId);
+            const price = p ? p.price : 0;
+            total += price * (c.qty || 1);
+            let opt = [];
+            if (c.color) opt.push(`لون: ${c.color}`);
+            if (c.size) opt.push(`مقاس: ${c.size}`);
+            return `${p ? p.name : 'منتج'} (العدد: ${c.qty}${opt.length ? ' - ' + opt.join('، ') : ''})`;
+          }).join(" ، ");
+          cartSummary = `تحتوي السلة على ${cart.length} أصناف (${itemsText}) بإجمالي تقريبي: ${formatPrice(total)}`;
+        }
+      }
+
+      // 2. قراءة الأقسام
+      const categories = (Store.getCategories ? Store.getCategories() : []).map(c => ({
+        id: c.id,
+        name: c.name
+      }));
+
+      // 3. تصفية المنتجات الذكية مع كامل تفاصيل الألوان والمقاسات والوصف
+      const allProducts = Store.getProducts ? Store.getProducts() : (Store.getIndexItems ? Store.getIndexItems() : []);
+      const available = allProducts.filter(p => p.available !== false && (p.stock > 0 || (p.inventory && Object.values(p.inventory).some(v => v > 0))));
+
       const queryWords = text.toLowerCase().split(/\s+/).filter(w => w.length > 1);
-      let matched = available.filter(p => queryWords.some(w => (p.name || "").toLowerCase().includes(w)));
-      
-      // إذا لم يجد تطابقاً بالاسم يرسل أول 15 منتجاً فقط كعينة خفيفة
+      const isOfferQuery = /عرض|عروض|خصم|تخفيض/i.test(text);
+
+      let matched = available.filter(p => {
+        if (isOfferQuery && p.isOffer) return true;
+        const nameMatch = (p.name || "").toLowerCase();
+        const descMatch = (p.description || "").toLowerCase();
+        return queryWords.some(w => nameMatch.includes(w) || descMatch.includes(w));
+      });
+
       const selectedProducts = (matched.length > 0 ? matched : available).slice(0, 15).map(p => ({
         id: p.id,
         name: p.name,
         price: p.price,
-        barcode: p.barcode || ""
+        oldPrice: p.oldPrice || 0,
+        isOffer: !!p.isOffer,
+        colors: Array.isArray(p.colors) ? p.colors.map(c => c.name || c) : [],
+        sizes: Array.isArray(p.sizes) ? p.sizes : [],
+        desc: (p.description || "").slice(0, 70)
       }));
 
+      // إرسال الطلب مع الذاكرة السابقة
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
+          history: conversationHistory,
           storeInfo: storeInfo,
-          products: selectedProducts
+          categories: categories,
+          products: selectedProducts,
+          cartInfo: { summary: cartSummary }
         })
       });
 
       const data = await response.json();
       removeMessage(loadingId);
 
+      // حفظ السؤال والجواب في ذاكرة الجلسة
+      conversationHistory.push({ role: "user", content: text });
+      conversationHistory.push({ role: "assistant", content: data.reply });
+      if (conversationHistory.length > 8) conversationHistory.splice(0, 2);
+
       renderBotResponse(data.reply, data.productIds, available);
 
     } catch (err) {
       removeMessage(loadingId);
-      addMessage("bot", "تعذر الاتصال حالياً، يرجى المحاولة ثانية.");
+      addMessage("bot", "تعذر الاتصال بالمساعد حالياً، يرجى إعادة المحاولة.");
     }
   }
 
@@ -135,7 +190,7 @@
           <div class="ai-product-list">
             ${matched.map(p => `
               <div class="ai-product-card">
-                <div class="ai-prd-title">${escapeHtml(p.name)} ${p.barcode ? `— SKU: ${escapeHtml(p.barcode)}` : ""}</div>
+                <div class="ai-prd-title">${escapeHtml(p.name)}</div>
                 <div class="ai-prd-foot">
                   <span class="ai-prd-price">${formatPrice(p.price)}</span>
                   <a href="product.html?id=${encodeURIComponent(p.id)}" class="ai-view-btn">عرض المنتج ↗</a>
