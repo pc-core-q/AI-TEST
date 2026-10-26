@@ -1,6 +1,5 @@
 // js/ai-assistant.js
 (function() {
-  // 1. حقن نافذة المساعد الذكي وزر المحادثة في الصفحة
   const chatUI = `
     <div id="aiChatWidget" class="ai-widget">
       <button id="aiToggleBtn" class="ai-toggle-btn" title="المساعد الذكي">
@@ -24,8 +23,7 @@
         <div id="aiMessages" class="ai-messages">
           <div class="ai-msg bot">
             <div class="ai-bubble">
-              مرحباً بك! أنا المساعد الذكي لـ <strong>${escapeHtml(STORE_CONFIG.storeName || "المتجر")}</strong>.
-              أستطيع إجابتك عن أي سؤال يخص التوصيل، أوقات العمل، المنتجات، أو تقديم نصائح واقتراحات لاختيار الأنسب لك!
+              مرحباً بك! أنا مساعد <strong>${escapeHtml(STORE_CONFIG.storeName || "المتجر")}</strong> السريع. كيف أقدر أساعدك اليوم؟
             </div>
           </div>
         </div>
@@ -39,7 +37,6 @@
   `;
   document.body.insertAdjacentHTML("beforeend", chatUI);
 
-  const widget = document.getElementById("aiChatWidget");
   const box = document.getElementById("aiChatBox");
   const toggleBtn = document.getElementById("aiToggleBtn");
   const closeBtn = document.getElementById("aiCloseBtn");
@@ -53,7 +50,6 @@
   };
   closeBtn.onclick = () => { box.style.display = "none"; };
 
-  // 2. إرسال السؤال ومعالجة البيانات
   async function sendMessage() {
     const text = input.value.trim();
     if (!text) return;
@@ -61,23 +57,31 @@
     addMessage("user", text);
     input.value = "";
 
-    const loadingId = addMessage("bot", "جاري التفكير والبحث في المتجر...");
+    const loadingId = addMessage("bot", "جاري البحث...");
 
     try {
-      // قراءة إعدادات المتجر الكاملة من Store
       const settings = Store.getSettings ? Store.getSettings() : {};
       const storeInfo = {
         name: STORE_CONFIG.storeName || "",
-        description: STORE_CONFIG.storeDescription || "",
         workingHours: settings.workingHours || STORE_CONFIG.workingHours || "مفتوح يومياً",
-        deliveryInfo: settings.deliveryInfo || STORE_CONFIG.deliveryInfo || "توصيل لكافة المحافظات",
-        address: settings.address || STORE_CONFIG.address || "",
+        deliveryInfo: settings.deliveryInfo || STORE_CONFIG.deliveryInfo || "توصيل متوفر",
         whatsapp: settings.whatsapp || STORE_CONFIG.whatsappNumber || ""
       };
 
-      // قراءة المنتجات المتاحة
+      // تصفية ذكية سريعة في الهاتف لإرسال أهم المنتجات فقط بحجم خفيف جداً
       const allItems = Store.getIndexItems ? Store.getIndexItems() : (Store.getProducts ? Store.getProducts() : []);
-      const availableProducts = allItems.filter(p => p.available !== false && p.stock > 0);
+      const available = allItems.filter(p => p.available !== false && p.stock > 0);
+      
+      const queryWords = text.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+      let matched = available.filter(p => queryWords.some(w => (p.name || "").toLowerCase().includes(w)));
+      
+      // إذا لم يجد تطابقاً بالاسم يرسل أول 15 منتجاً فقط كعينة خفيفة
+      const selectedProducts = (matched.length > 0 ? matched : available).slice(0, 15).map(p => ({
+        id: p.id,
+        name: p.name,
+        price: p.price,
+        barcode: p.barcode || ""
+      }));
 
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -85,18 +89,18 @@
         body: JSON.stringify({
           message: text,
           storeInfo: storeInfo,
-          products: availableProducts
+          products: selectedProducts
         })
       });
 
       const data = await response.json();
       removeMessage(loadingId);
 
-      renderBotResponse(data.reply, data.productIds, availableProducts);
+      renderBotResponse(data.reply, data.productIds, available);
 
     } catch (err) {
       removeMessage(loadingId);
-      addMessage("bot", "تعذر الاتصال بالمساعد الذكي حالياً، يرجى المحاولة لاحقاً.");
+      addMessage("bot", "تعذر الاتصال حالياً، يرجى المحاولة ثانية.");
     }
   }
 
@@ -119,7 +123,6 @@
     if (el) el.remove();
   }
 
-  // 3. عرض رد البوت مع بطاقات المنتجات إن وُجدت
   function renderBotResponse(replyText, productIds, productsList) {
     const div = document.createElement("div");
     div.className = "ai-msg bot";
