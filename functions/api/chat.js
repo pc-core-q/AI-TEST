@@ -3,61 +3,48 @@ export async function onRequestPost(context) {
     const { request, env } = context;
     const body = await request.json();
     
-    // استلام البيانات القادمة من المتجر
     const { message, storeInfo, products } = body;
-    const apiKey = env.GEMINI_API_KEY;
+    const apiKey = (env.GEMINI_API_KEY || "").trim();
 
     if (!apiKey) {
-      return new Response(JSON.stringify({ reply: "عذراً، لم يتم ضبط مفتاح الذكاء الاصطناعي في Cloudflare." }), {
+      return new Response(JSON.stringify({ reply: "تنبيه: مفتاح GEMINI_API_KEY غير موجود في إعدادات Cloudflare." }), {
         headers: { "Content-Type": "application/json" }
       });
     }
 
-    // تجهيز قائمة مختصرة بالمنتجات ليفهمها الذكاء الاصطناعي
-    const productsText = (products || []).slice(0, 100).map(p => 
-      `- [ID: ${p.id}] الاسم: ${p.name} | السعر: ${p.price} | الباركود: ${p.barcode || 'لا يوجد'} | الوصف: ${p.description || 'لا يوجد'}`
+    // تجهيز قائمة مصغرة بالمنتجات
+    const productsText = (products || []).slice(0, 60).map(p => 
+      `- [ID: ${p.id}] الاسم: ${p.name} | السعر: ${p.price} | الباركود: ${p.barcode || 'لا يوجد'}`
     ).join("\n");
 
-    // التعليمات الكاملة للبوت ليتصرف كبائع ومستشار خبير في المحل
-    const systemPrompt = `
-أنت المساعد الذكي والمستشار الرسمي لمتجر "${storeInfo.name}".
-مهمتك: مساعدة الزبائن بلباقة واحترافية وود، والإجابة عن كل ما يخص المتجر وتقديم النصائح التسويقية والمهنية.
+    const systemPrompt = `أنت المساعد الذكي لمتجر "${storeInfo?.name || 'المتجر'}". جاوب الزبون بلباقة وبساطة. إذا اقترحت منتجات ضع معرّفاتها في النهاية هكذا: <!--PRODUCTS: ["id1"]-->`;
 
-معلومات المتجر:
-- اسم المتجر: ${storeInfo.name}
-- الوصف العام: ${storeInfo.description}
-- أوقات العمل: ${storeInfo.workingHours}
-- معلومات التوصيل: ${storeInfo.deliveryInfo}
-- العنوان: ${storeInfo.address}
-- للتواصل أو الطلب المباشر: عبر واتساب ${storeInfo.whatsapp}
-
-قائمة المنتجات المتوفرة في المتجر حالياً:
-${productsText}
-
-قواعد الإجابة:
-1. أجب بأسلوب ودود وسلس ومرحب (لهجة عراقية مهذبة أو عربية مبسطة).
-2. إذا سألك الزبون نصيحة (مثال: مستحضرات لبشرة معينة، قطع كمبيوتر متوافقة، أو تنسيق ملابس)، انصحه كخبير، ثم اقترح له المنتجات المناسبة من القائمة أعلاه فقط ولا تقترح منتجات غير موجودة بالمحل.
-3. إذا سأل عن التوصيل، الدوام، العنوان، أو طريقة الشراء، جاوبه بدقة من معلومات المتجر أعلاه.
-4. مهم جداً: إذا قمت باقتراح أو ذكر منتجات من القائمة، في نهاية رسالتك تماماً اكتب أرقام معرّفات المنتجات (IDs) فقط بهذا الشكل وبدون أي تغيير:
-<!--PRODUCTS: ["prd_xxx", "prd_yyy"]-->
-`;
-
-    // الاتصال بموديل Gemini 1.5 Flash المجاني والسريع
+    // استدعاء Gemini API
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     
     const geminiRes = await fetch(geminiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: message }] }],
+        contents: [{ role: "user", parts: [{ text: (message || "") }] }],
         systemInstruction: { parts: [{ text: systemPrompt }] }
       })
     });
 
     const data = await geminiRes.json();
-    const rawReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "عذراً، لم أستطع معالجة السؤال حالياً.";
 
-    // استخراج معرّفات المنتجات إن وُجدت
+    // إذا أرجعت جوجل أي خطأ سنظهره مباشرة لنعرف السبب
+    if (data.error) {
+      return new Response(JSON.stringify({ 
+        reply: `خطأ من Google: ${data.error.message || JSON.stringify(data.error)}` 
+      }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const rawReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "لم أجد إجابة مناسبة حالياً.";
+
+    // استخراج معرّفات المنتجات
     let productIds = [];
     let cleanReply = rawReply;
     const match = rawReply.match(/<!--PRODUCTS:\s*(\[.*?\])\s*-->/);
@@ -73,8 +60,8 @@ ${productsText}
     });
 
   } catch (err) {
-    return new Response(JSON.stringify({ reply: "حدث خطأ أثناء الاتصال بالمساعد الذكي." }), {
-      status: 500,
+    return new Response(JSON.stringify({ reply: `خطأ بالسيرفر: ${err.message}` }), {
+      status: 200,
       headers: { "Content-Type": "application/json" }
     });
   }
