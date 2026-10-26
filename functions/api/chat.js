@@ -12,22 +12,23 @@ export async function onRequestPost(context) {
       });
     }
 
-    // تلخيص خفيف للمنتجات لتقليل وقت المعالجة وتسريع الرد
-    const productsText = (products || []).slice(0, 40).map(p => 
-      `[${p.id}] ${p.name} - ${p.price}`
+    // تلخيص الكتالوج لإرسال أقل حجم ممكن وتفادي التأخير
+    const productsText = (products || []).slice(0, 50).map(p => 
+      `[${p.id}] ${p.name} (${p.price} د.ع)`
     ).join("\n");
 
-    const prompt = `أنت مساعد متجر "${storeInfo?.name || 'المتجر'}".
-أوقات العمل: ${storeInfo?.workingHours || ''} | التوصيل: ${storeInfo?.deliveryInfo || ''}
+    const prompt = `أنت بائع ومساعد متجر "${storeInfo?.name || 'المتجر'}".
+معلومات المتجر: ${storeInfo?.workingHours || ''} | ${storeInfo?.deliveryInfo || ''}
+
 المنتجات:
 ${productsText}
 
 سؤال الزبون: ${message || ""}
-جاوب باختصار وسرعة بأسلوب ودود. إذا اقترحت منتجات ضع أرقامها فقط في النهاية هكذا:
+جاوب فوراً وبشكل مختصر بلهجة ودية. إذا اقترحت منتجات ضع معرّفاتها في النهاية هكذا فقط:
 <!--PRODUCTS: ["prd_xxx"]-->`;
 
-    // استخدام أسرع وأخف موديل نصي متاح في حسابك
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`;
+    // gemini-flash-latest هو أسرع موديل استجابة وبدون تأخير التفكير
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
 
     const geminiRes = await fetch(geminiUrl, {
       method: "POST",
@@ -35,7 +36,8 @@ ${productsText}
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
-          maxOutputTokens: 250 // إجابات سريعة ومختصرة بدون إطالة
+          maxOutputTokens: 200,
+          temperature: 0.6
         }
       })
     });
