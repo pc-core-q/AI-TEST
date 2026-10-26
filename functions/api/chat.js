@@ -12,60 +12,37 @@ export async function onRequestPost(context) {
       });
     }
 
-    // تجهيز قائمة المنتجات
-    const productsText = (products || []).slice(0, 70).map(p => 
-      `- [ID: ${p.id}] الاسم: ${p.name} | السعر: ${p.price} | الباركود: ${p.barcode || 'لا يوجد'}`
+    // تلخيص خفيف للمنتجات لتقليل وقت المعالجة وتسريع الرد
+    const productsText = (products || []).slice(0, 40).map(p => 
+      `[${p.id}] ${p.name} - ${p.price}`
     ).join("\n");
 
-    const systemPrompt = `أنت المساعد الذكي لمتجر "${storeInfo?.name || 'المتجر'}".
-جاوب الزبون بلباقة وبساطة. إذا اقترحت منتجات ضع معرّفاتها في نهاية الرد هكذا:
+    const prompt = `أنت مساعد متجر "${storeInfo?.name || 'المتجر'}".
+أوقات العمل: ${storeInfo?.workingHours || ''} | التوصيل: ${storeInfo?.deliveryInfo || ''}
+المنتجات:
+${productsText}
+
+سؤال الزبون: ${message || ""}
+جاوب باختصار وسرعة بأسلوب ودود. إذا اقترحت منتجات ضع أرقامها فقط في النهاية هكذا:
 <!--PRODUCTS: ["prd_xxx"]-->`;
 
-    const fullPrompt = `${systemPrompt}\n\nسؤال الزبون:\n${message || ""}`;
+    // استخدام أسرع وأخف موديل نصي متاح في حسابك
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`;
 
-    // موديلات مفعّلة في حسابك: إذا واجه الأول ضغطاً، يتحول تلقائياً للثاني
-    const modelsToTry = [
-      "gemini-3.8-flash",
-      "gemini-3.8-flash-lite-tts",
-      "gemini-3.1-flash-lite"
-    ];
-
-    let rawReply = null;
-    let lastError = null;
-
-    for (const model of modelsToTry) {
-      try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        const geminiRes = await fetch(geminiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: fullPrompt }] }]
-          })
-        });
-
-        const data = await geminiRes.json();
-
-        if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          rawReply = data.candidates[0].content.parts[0].text;
-          break; // تم الرد بنجاح، توقف عن المحاولة
-        } else if (data.error) {
-          lastError = data.error.message;
+    const geminiRes = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          maxOutputTokens: 250 // إجابات سريعة ومختصرة بدون إطالة
         }
-      } catch (e) {
-        lastError = e.message;
-      }
-    }
+      })
+    });
 
-    if (!rawReply) {
-      return new Response(JSON.stringify({ 
-        reply: `عذراً، السيرفرات مشغولة حالياً، يرجى إعادة المحاولة بعد ثوانٍ. (${lastError})` 
-      }), {
-        headers: { "Content-Type": "application/json" }
-      });
-    }
+    const data = await geminiRes.json();
+    const rawReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "أهلاً بك! كيف أقدر أساعدك؟";
 
-    // استخراج معرّفات المنتجات
     let productIds = [];
     let cleanReply = rawReply;
     const match = rawReply.match(/<!--PRODUCTS:\s*(\[.*?\])\s*-->/);
@@ -81,7 +58,7 @@ export async function onRequestPost(context) {
     });
 
   } catch (err) {
-    return new Response(JSON.stringify({ reply: `خطأ بالسيرفر: ${err.message}` }), {
+    return new Response(JSON.stringify({ reply: "حدث خطأ بسيط، يرجى إعادة المحاولة." }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
