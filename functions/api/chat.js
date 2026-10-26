@@ -12,23 +12,22 @@ export async function onRequestPost(context) {
       });
     }
 
-    // تلخيص الكتالوج لإرسال أقل حجم ممكن وتفادي التأخير
-    const productsText = (products || []).slice(0, 50).map(p => 
+    // تلخيص خفيف جداً (أول 20 منتجاً فقط) لسرعة معالجة فائقة
+    const productsText = (products || []).slice(0, 20).map(p => 
       `[${p.id}] ${p.name} (${p.price} د.ع)`
     ).join("\n");
 
     const prompt = `أنت بائع ومساعد متجر "${storeInfo?.name || 'المتجر'}".
-معلومات المتجر: ${storeInfo?.workingHours || ''} | ${storeInfo?.deliveryInfo || ''}
-
-المنتجات:
+ساعات العمل: ${storeInfo?.workingHours || ''} | التوصيل: ${storeInfo?.deliveryInfo || ''}
+المنتجات المتاحة:
 ${productsText}
 
 سؤال الزبون: ${message || ""}
-جاوب فوراً وبشكل مختصر بلهجة ودية. إذا اقترحت منتجات ضع معرّفاتها في النهاية هكذا فقط:
+جاوب فوراً وبسطرين فقط بلهجة ودية سريعة. إذا اقترحت منتجات ضع أرقامها فقط في النهاية هكذا:
 <!--PRODUCTS: ["prd_xxx"]-->`;
 
-    // gemini-flash-latest هو أسرع موديل استجابة وبدون تأخير التفكير
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
+    // gemini-flash-lite-latest هو أسرع موديل نصي متاح في حسابك
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${apiKey}`;
 
     const geminiRes = await fetch(geminiUrl, {
       method: "POST",
@@ -36,8 +35,8 @@ ${productsText}
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
-          maxOutputTokens: 200,
-          temperature: 0.6
+          maxOutputTokens: 150,
+          temperature: 0.4
         }
       })
     });
@@ -60,7 +59,7 @@ ${productsText}
     });
 
   } catch (err) {
-    return new Response(JSON.stringify({ reply: "حدث خطأ بسيط، يرجى إعادة المحاولة." }), {
+    return new Response(JSON.stringify({ reply: "حدث خطأ بسيط، يرجى المحاولة ثانية." }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
