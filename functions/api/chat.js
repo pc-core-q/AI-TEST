@@ -12,32 +12,60 @@ export async function onRequestPost(context) {
       });
     }
 
-    // تلخيص خفيف للمنتجات لتسريع الإجابة
+    // 1. جلب قائمة الموديلات المتاحة لحسابك مباشرة من Groq بدون تخمين
+    const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { "Authorization": `Bearer ${apiKey}` }
+    });
+    const modelsData = await modelsRes.json();
+
+    if (modelsData.error) {
+      return new Response(JSON.stringify({ reply: `خطأ في مفتاح Groq: ${modelsData.error.message}` }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    // استبعاد موديلات الصوت والصور وحصر الموديلات النصية المتاحة
+    const availableChatModels = (modelsData.data || [])
+      .map(m => m.id)
+      .filter(id => !id.includes("whisper") && !id.includes("embed") && !id.includes("guard") && !id.includes("vision"));
+
+    if (availableChatModels.length === 0) {
+      return new Response(JSON.stringify({ reply: "لا توجد موديلات محادثة مفعلة في حسابك في Groq حالياً." }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    // اختيار أفضل موديل متاح تلقائياً (Llama أو Qwen أو أول موديل متاح)
+    const activeModel = availableChatModels.find(id => id.includes("llama")) || 
+                        availableChatModels.find(id => id.includes("qwen") || id.includes("mixtral") || id.includes("gemma")) || 
+                        availableChatModels[0];
+
+    // 2. تجهيز ملخص المنتجات
     const productsText = (products || []).slice(0, 30).map(p => 
       `[${p.id}] ${p.name} - السعر: ${p.price} د.ع`
     ).join("\n");
 
     const systemPrompt = `أنت مساعد متجر "${storeInfo?.name || 'المتجر'}".
 أوقات العمل: ${storeInfo?.workingHours || ''}
-معلومات التوصيل: ${storeInfo?.deliveryInfo || ''}
+التوصيل: ${storeInfo?.deliveryInfo || ''}
 المنتجات المتوفرة:
 ${productsText}
 
 التعليمات:
-- أجب عن سؤال الزبون بلباقة وسرعة واختصار بلهجة عربية بسيطة ومرحبة.
-- اقترح المنتجات المناسبة من القائمة أعلاه فقط.
-- إذا اقترحت أو ذكرت أي منتج، ضع معرّفاته فقط في نهاية رسالتك تماماً بهذا الشكل:
+- أجب بلباقة وسرعة واختصار بلهجة عربية بسيطة ومرحبة.
+- اقترح المنتجات المناسبة من القائمة فقط.
+- إذا اقترحت أي منتج ضع معرّفاته في نهاية الرسالة بهذا الشكل حصراً:
 <!--PRODUCTS: ["prd_xxx"]-->`;
 
-    // استخدام الموديل الافتراضي السريع والمجاني لجميع الحسابات
-    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    // 3. إرسال الطلب للموديل المختار تلقائياً
+    const chatRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: activeModel,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: message || "" }
@@ -47,17 +75,15 @@ ${productsText}
       })
     });
 
-    const data = await groqRes.json();
+    const chatData = await chatRes.json();
 
-    if (data.error) {
-      return new Response(JSON.stringify({ 
-        reply: `خطأ من Groq: ${data.error.message || JSON.stringify(data.error)}` 
-      }), {
+    if (chatData.error) {
+      return new Response(JSON.stringify({ reply: `خطأ من Groq (${activeModel}): ${chatData.error.message}` }), {
         headers: { "Content-Type": "application/json" }
       });
     }
 
-    const rawReply = data.choices?.[0]?.message?.content || "عذراً، لم أستطع العثور على رد مناسب حالياً.";
+    const rawReply = chatData.choices?.[0]?.message?.content || "أهلاً بك! كيف يمكنني مساعدتك؟";
 
     // استخراج معرّفات المنتجات لعرض كروت الشراء
     let productIds = [];
