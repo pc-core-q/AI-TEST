@@ -720,12 +720,14 @@ td.row-actions>*+*{margin-inline-start:6px}
   *{transition:none!important;animation:none!important;scroll-behavior:auto!important}
 }
 /* ==================== AI Assistant Widget ==================== */
+/* ==================== AI Assistant Widget ==================== */
 .ai-widget {
   position: fixed;
   bottom: 25px;
-  left: 20px !important;  /* يثبت الزر في أسفل اليسار بعيداً عن السهم */
+  left: 20px !important;
   right: auto !important;
-  z-index: 999999;
+  z-index: 99999;
+  direction: rtl; /* لضمان ضبط الاتجاه العربي دائماً */
 }
 
 .ai-toggle-btn {
@@ -740,7 +742,7 @@ td.row-actions>*+*{margin-inline-start:6px}
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform 0.2s ease;
 }
 .ai-toggle-btn:hover {
   transform: scale(1.08);
@@ -749,11 +751,12 @@ td.row-actions>*+*{margin-inline-start:6px}
 .ai-chat-box {
   position: absolute;
   bottom: 70px;
-  inset-inline-start: 0;
+  left: 0 !important;      /* يثبت الصندوق فوق الزر مباشرة من جهة اليسار */
+  right: auto !important;  /* يمنع الصندوق من التمدد خارج الشاشة لليمين */
   width: 350px;
   height: 500px;
-  max-width: calc(100vw - 35px);
-  max-height: calc(100vh - 100px);
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 110px);
   background: var(--surface, #ffffff);
   border: 1px solid var(--border, #e2e8f0);
   border-radius: var(--r-card, 16px);
