@@ -723,8 +723,9 @@ td.row-actions>*+*{margin-inline-start:6px}
 .ai-widget {
   position: fixed;
   bottom: 25px;
-  inset-inline-start: 25px; /* يمين أو يسار حسب لغة المتجر */
-  z-index: 99999;
+  left: 20px !important;  /* يثبت الزر في أسفل اليسار بعيداً عن السهم */
+  right: auto !important;
+  z-index: 999999;
 }
 
 .ai-toggle-btn {
